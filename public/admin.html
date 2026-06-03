@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Dashboard — Staff Voice Portal</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page admin-page">
+    <header>
+      <div class="logo-mark">&#9679;</div>
+      <h1>Admin Dashboard</h1>
+      <p class="tagline">Staff Voice Portal — Leadership View</p>
+    </header>
+
+    <div id="authGate" class="auth-gate">
+      <div class="field">
+        <label for="tokenInput">Admin access token</label>
+        <input type="password" id="tokenInput" placeholder="Enter your admin token" />
+      </div>
+      <button class="submit-btn" id="authBtn">View Submissions</button>
+    </div>
+
+    <main id="dashboard" class="hidden">
+      <div class="filter-bar">
+        <select id="filterType">
+          <option value="">All types</option>
+          <option value="question">Questions</option>
+          <option value="concern">Concerns</option>
+          <option value="request">Requests</option>
+          <option value="suggestion">Suggestions</option>
+        </select>
+        <select id="filterStatus">
+          <option value="">All statuses</option>
+          <option value="new">New</option>
+          <option value="in-progress">In Progress</option>
+          <option value="resolved">Resolved</option>
+        </select>
+        <select id="filterUrgency">
+          <option value="">All urgency levels</option>
+          <option value="urgent">Urgent</option>
+          <option value="soon">Soon</option>
+          <option value="routine">Routine</option>
+        </select>
+        <button class="refresh-btn" id="refreshBtn">&#8635; Refresh</button>
+      </div>
+
+      <div id="submissionsList"></div>
+    </main>
+  </div>
+
+  <script>
+    let token = '';
+    let allSubmissions = [];
+
+    const tokenInput = document.getElementById('tokenInput');
+    const authBtn = document.getElementById('authBtn');
+    const authGate = document.getElementById('authGate');
+    const dashboard = document.getElementById('dashboard');
+
+    const urlToken = new URLSearchParams(window.location.search).get('token');
+    if (urlToken) { tokenInput.value = urlToken; }
+
+    authBtn.addEventListener('click', () => {
+      token = tokenInput.value.trim();
+      if (token) loadSubmissions();
+    });
+    tokenInput.addEventListener('keydown', e => { if (e.key === 'Enter') authBtn.click(); });
+    document.getElementById('refreshBtn').addEventListener('click', loadSubmissions);
+    document.getElementById('filterType').addEventListener('change', renderSubmissions);
+    document.getElementById('filterStatus').addEventListener('change', renderSubmissions);
+    document.getElementById('filterUrgency').addEventListener('change', renderSubmissions);
+
+    if (urlToken) loadSubmissions();
+
+    async function loadSubmissions() {
+      token = tokenInput.value.trim() || urlToken || token;
+      try {
+        const res = await fetch(`/api/admin/submissions?token=${encodeURIComponent(token)}`);
+        if (res.status === 401) {
+          alert('Invalid token. Please try again.');
+          return;
+        }
+        allSubmissions = await res.json();
+        authGate.classList.add('hidden');
+        dashboard.classList.remove('hidden');
+        renderSubmissions();
+      } catch {
+        alert('Could not load submissions. Is the server running?');
+      }
+    }
+
+    function renderSubmissions() {
+      const typeFilter = document.getElementById('filterType').value;
+      const statusFilter = document.getElementById('filterStatus').value;
+      const urgencyFilter = document.getElementById('filterUrgency').value;
+
+      const filtered = allSubmissions.filter(s =>
+        (!typeFilter || s.type === typeFilter) &&
+        (!statusFilter || s.status === statusFilter) &&
+        (!urgencyFilter || s.urgency === urgencyFilter)
+      );
+
+      const list = document.getElementById('submissionsList');
+
+      if (filtered.length === 0) {
+        list.innerHTML = '<p class="empty-state">No submissions match the selected filters.</p>';
+        return;
+      }
+
+      list.innerHTML = filtered.map(s => `
+        <div class="submission-card status-${s.status}" data-id="${s.id}">
+          <div class="card-header">
+            <span class="badge type-${s.type}">${capitalize(s.type)}</span>
+            <span class="badge urgency-${s.urgency}">${urgencyLabel(s.urgency)}</span>
+            <span class="badge status-badge status-${s.status}">${statusLabel(s.status)}</span>
+            <span class="card-date">${formatDate(s.createdAt)}</span>
+          </div>
+          <p class="card-message">${escapeHtml(s.message)}</p>
+          <div class="card-meta">
+            ${s.anonymous
+              ? '<span class="anon-tag">Anonymous</span>'
+              : `<span>${escapeHtml(s.name || 'Not provided')}${s.role ? ` &mdash; ${escapeHtml(s.role)}` : ''}</span>`
+            }
+          </div>
+          ${s.adminNote ? `<div class="admin-note"><strong>Note:</strong> ${escapeHtml(s.adminNote)}</div>` : ''}
+          <div class="card-actions">
+            <select class="status-select" data-id="${s.id}">
+              <option value="new" ${s.status === 'new' ? 'selected' : ''}>New</option>
+              <option value="in-progress" ${s.status === 'in-progress' ? 'selected' : ''}>In Progress</option>
+              <option value="resolved" ${s.status === 'resolved' ? 'selected' : ''}>Resolved</option>
+            </select>
+            <input type="text" class="note-input" data-id="${s.id}"
+              placeholder="Add a note…" value="${escapeHtml(s.adminNote || '')}" />
+            <button class="save-btn" data-id="${s.id}">Save</button>
+          </div>
+        </div>
+      `).join('');
+
+      list.querySelectorAll('.save-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          const statusSelect = list.querySelector(`.status-select[data-id="${id}"]`);
+          const noteInput = list.querySelector(`.note-input[data-id="${id}"]`);
+          await updateSubmission(id, statusSelect.value, noteInput.value);
+        });
+      });
+    }
+
+    async function updateSubmission(id, status, note) {
+      await fetch(`/api/admin/submissions/${id}?token=${encodeURIComponent(token)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, note }),
+      });
+      await loadSubmissions();
+    }
+
+    function capitalize(s) { return s ? s[0].toUpperCase() + s.slice(1) : ''; }
+    function urgencyLabel(u) {
+      return { routine: 'Routine', soon: 'Needs Attention Soon', urgent: '⚠ Urgent' }[u] || u;
+    }
+    function statusLabel(s) {
+      return { new: 'New', 'in-progress': 'In Progress', resolved: 'Resolved' }[s] || s;
+    }
+    function formatDate(iso) {
+      return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    }
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+  </script>
+</body>
+</html>
