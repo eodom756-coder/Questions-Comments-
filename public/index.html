@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Staff Voice Portal</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="logo-mark">&#9679;</div>
+      <h1>Staff Voice Portal</h1>
+      <p class="tagline">Your voice matters. Share a question, concern, request, or suggestion — anonymously if you prefer.</p>
+    </header>
+
+    <main>
+      <form id="voiceForm" novalidate>
+
+        <fieldset class="type-group">
+          <legend>What kind of message is this?</legend>
+          <div class="type-grid">
+            <label class="type-card">
+              <input type="radio" name="type" value="question" required />
+              <span class="type-icon">&#10067;</span>
+              <span class="type-label">Question</span>
+            </label>
+            <label class="type-card">
+              <input type="radio" name="type" value="concern" />
+              <span class="type-icon">&#9888;</span>
+              <span class="type-label">Concern</span>
+            </label>
+            <label class="type-card">
+              <input type="radio" name="type" value="request" />
+              <span class="type-icon">&#128203;</span>
+              <span class="type-label">Request</span>
+            </label>
+            <label class="type-card">
+              <input type="radio" name="type" value="suggestion" />
+              <span class="type-icon">&#128161;</span>
+              <span class="type-label">Suggestion</span>
+            </label>
+          </div>
+          <p class="field-error hidden" id="typeError">Please select a type.</p>
+        </fieldset>
+
+        <div class="field">
+          <label for="urgency">How time-sensitive is this?</label>
+          <select id="urgency" name="urgency">
+            <option value="routine">Routine — no rush</option>
+            <option value="soon">Needs attention soon</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="message">Your message <span class="required">*</span></label>
+          <textarea id="message" name="message" rows="6"
+            placeholder="Write your question, concern, request, or suggestion here..."
+            required></textarea>
+          <p class="field-error hidden" id="messageError">Please enter a message.</p>
+        </div>
+
+        <div class="anon-section">
+          <label class="toggle-label">
+            <input type="checkbox" id="anonymousToggle" name="anonymous" value="true" />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            Submit anonymously
+          </label>
+          <p class="anon-note">When checked, your name and role will not be included.</p>
+        </div>
+
+        <div id="identityFields" class="identity-fields">
+          <div class="field-row">
+            <div class="field">
+              <label for="name">Your name <span class="optional">(optional)</span></label>
+              <input type="text" id="name" name="name" placeholder="First name or full name" autocomplete="name" />
+            </div>
+            <div class="field">
+              <label for="role">Role / Department <span class="optional">(optional)</span></label>
+              <input type="text" id="role" name="role" placeholder="e.g. Peer Support, Billing" />
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="submit-btn" id="submitBtn">
+          <span id="submitLabel">Send Message</span>
+          <span id="submitSpinner" class="spinner hidden"></span>
+        </button>
+      </form>
+
+      <div id="successPanel" class="success-panel hidden">
+        <div class="success-icon">&#10003;</div>
+        <h2>Message received</h2>
+        <p>Thank you for speaking up. Leadership will review your submission. You will not be penalized for sharing your thoughts.</p>
+        <button class="reset-btn" id="resetBtn">Submit another</button>
+      </div>
+
+      <div id="errorPanel" class="error-panel hidden">
+        <p id="errorMessage">Something went wrong. Please try again.</p>
+      </div>
+    </main>
+
+    <footer>
+      <p>All submissions are reviewed by clinical leadership. Anonymous submissions cannot be traced back to you.</p>
+    </footer>
+  </div>
+
+  <script>
+    const form = document.getElementById('voiceForm');
+    const anonToggle = document.getElementById('anonymousToggle');
+    const identityFields = document.getElementById('identityFields');
+    const successPanel = document.getElementById('successPanel');
+    const errorPanel = document.getElementById('errorPanel');
+    const submitBtn = document.getElementById('submitBtn');
+    const submitLabel = document.getElementById('submitLabel');
+    const submitSpinner = document.getElementById('submitSpinner');
+
+    anonToggle.addEventListener('change', () => {
+      identityFields.classList.toggle('hidden', anonToggle.checked);
+    });
+
+    document.querySelectorAll('.type-card input').forEach(radio => {
+      radio.addEventListener('change', () => {
+        document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+        if (radio.checked) radio.closest('.type-card').classList.add('selected');
+        document.getElementById('typeError').classList.add('hidden');
+      });
+    });
+
+    document.getElementById('message').addEventListener('input', () => {
+      document.getElementById('messageError').classList.add('hidden');
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      form.reset();
+      document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+      identityFields.classList.remove('hidden');
+      successPanel.classList.add('hidden');
+      errorPanel.classList.add('hidden');
+      form.classList.remove('hidden');
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const type = form.querySelector('input[name="type"]:checked');
+      const message = document.getElementById('message').value.trim();
+      let valid = true;
+
+      if (!type) {
+        document.getElementById('typeError').classList.remove('hidden');
+        valid = false;
+      }
+      if (!message) {
+        document.getElementById('messageError').classList.remove('hidden');
+        valid = false;
+      }
+      if (!valid) return;
+
+      submitBtn.disabled = true;
+      submitLabel.textContent = 'Sending…';
+      submitSpinner.classList.remove('hidden');
+      errorPanel.classList.add('hidden');
+
+      const data = new URLSearchParams(new FormData(form));
+
+      try {
+        const res = await fetch('/api/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: data.toString(),
+        });
+        const json = await res.json();
+        if (json.success) {
+          form.classList.add('hidden');
+          successPanel.classList.remove('hidden');
+        } else {
+          throw new Error(json.error || 'Server error');
+        }
+      } catch (err) {
+        document.getElementById('errorMessage').textContent = 'Unable to submit. Please try again or contact leadership directly.';
+        errorPanel.classList.remove('hidden');
+      } finally {
+        submitBtn.disabled = false;
+        submitLabel.textContent = 'Send Message';
+        submitSpinner.classList.add('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
