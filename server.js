@@ -1,5 +1,4 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
@@ -8,12 +7,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'submissions.json');
 
-const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587');
-const SMTP_USER = process.env.SMTP_USER || '';
-const SMTP_PASS = process.env.SMTP_PASS || '';
 const NOTIFY_EMAILS = (process.env.NOTIFY_EMAILS || '').split(',').filter(Boolean);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'changeme';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -33,14 +29,7 @@ function saveSubmissions(submissions) {
 }
 
 async function sendEmailNotification(submission) {
-  if (!SMTP_USER || !SMTP_PASS || NOTIFY_EMAILS.length === 0) return;
-
-  const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-  });
+  if (!RESEND_API_KEY || NOTIFY_EMAILS.length === 0) return;
 
   const typeLabel = {
     question: 'Question',
@@ -59,22 +48,33 @@ async function sendEmailNotification(submission) {
     ? 'Anonymous'
     : `${submission.name || 'Unknown'}${submission.role ? ` (${submission.role})` : ''}`;
 
-  await transporter.sendMail({
-    from: `"Staff Voice Portal" <${SMTP_USER}>`,
-    to: NOTIFY_EMAILS.join(', '),
-    subject: `[${urgencyLabel}] New Staff ${typeLabel}`,
-    text: [
-      `Type: ${typeLabel}`,
-      `Urgency: ${urgencyLabel}`,
-      `From: ${fromLabel}`,
-      `Submitted: ${new Date(submission.createdAt).toLocaleString()}`,
-      '',
-      submission.message,
-      '',
-      `---`,
-      `View all submissions at your admin dashboard.`,
-    ].join('\n'),
+  const body = [
+    `Type: ${typeLabel}`,
+    `Urgency: ${urgencyLabel}`,
+    `From: ${fromLabel}`,
+    `Submitted: ${new Date(submission.createdAt).toLocaleString()}`,
+    '',
+    submission.message,
+  ].join('\n');
+
+  const res = await fetch('<https://api.resend.com/emails>', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: 'Staff Voice Portal <onboarding@resend.dev>',
+      to: NOTIFY_EMAILS,
+      subject: `[${urgencyLabel}] New Staff ${typeLabel}`,
+      text: body,
+    }),
   });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
 }
 
 app.post('/api/submit', async (req, res) => {
@@ -107,15 +107,14 @@ app.post('/api/submit', async (req, res) => {
     console.error('Email notification failed:', err.message);
   }
 
-  res.json({ success: true, id: submission.id });
+  res.json({ success: true, id: <submission.id> });
 });
 
 app.get('/api/admin/submissions', (req, res) => {
   if (req.query.token !== ADMIN_TOKEN) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  const submissions = loadSubmissions();
-  res.json(submissions);
+  res.json(loadSubmissions());
 });
 
 app.patch('/api/admin/submissions/:id', (req, res) => {
@@ -123,7 +122,7 @@ app.patch('/api/admin/submissions/:id', (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   const submissions = loadSubmissions();
-  const idx = submissions.findIndex(s => s.id === req.params.id);
+  const idx = submissions.findIndex(s => <s.id> === <req.params.id>);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
 
   const allowed = ['new', 'in-progress', 'resolved'];
@@ -138,6 +137,5 @@ app.patch('/api/admin/submissions/:id', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Staff Voice Portal running at http://localhost:${PORT}`);
-  if (!SMTP_USER) console.log('  Note: Set SMTP_USER, SMTP_PASS, and NOTIFY_EMAILS to enable email alerts.');
-  console.log(`  Admin dashboard: http://localhost:${PORT}/admin.html?token=${ADMIN_TOKEN}`);
+  console.log(`Admin dashboard: http://localhost:${PORT}/admin.html?token=${ADMIN_TOKEN}`);
 });
